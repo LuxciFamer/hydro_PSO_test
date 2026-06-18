@@ -25,6 +25,7 @@ cuda-version = "13.2.*"
 cuda = "==13.2"
 scipy = ">=1.17.1,<2"
 h5py = ">=3.16.0,<4"
+pixi-pycharm = ">=0.0.11,<0.0.12"
 
 [system-requirements]
 cuda = "13.2"

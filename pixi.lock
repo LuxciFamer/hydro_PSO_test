@@ -318,6 +318,7 @@ environments:
       - conda: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/noarch/openai-2.40.0-pyhd8ed1ab_0.conda
       - conda: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/noarch/packaging-26.2-pyhc364b38_0.conda
       - conda: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/noarch/patsy-1.0.2-pyhcf101f3_0.conda
+      - conda: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/noarch/pixi-pycharm-0.0.11-unix_hf108a03_0.conda
       - conda: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/noarch/pybind11-3.0.1-pyh7a1b43c_0.conda
       - conda: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/noarch/pybind11-abi-11-hc364b38_1.conda
       - conda: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/noarch/pybind11-global-3.0.1-pyhc7ab6ef_0.conda
@@ -4263,6 +4264,16 @@ packages:
   license: BSD-2-Clause AND PSF-2.0
   size: 193450
   timestamp: 1760998269054
+- conda: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/noarch/pixi-pycharm-0.0.11-unix_hf108a03_0.conda
+  sha256: 6e4480fa4126cac047b21b079c843264b14ceb3724acf7d3a5a7bcceff7ea5d2
+  md5: 6d02081f2ea16d3c4e0dc0d578508c1e
+  depends:
+  - __unix
+  - python >=3.8
+  license: BSD-3-Clause
+  license_family: BSD
+  size: 6986
+  timestamp: 1774948616259
 - conda: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/noarch/pybind11-3.0.1-pyh7a1b43c_0.conda
   sha256: 2558727093f13d4c30e124724566d16badd7de532fd8ee7483628977117d02be
   md5: 70ece62498c769280f791e836ac53fff
