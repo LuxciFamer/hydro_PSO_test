@@ -5,6 +5,12 @@
 包括水文过程线、收敛曲线、散点图、箱线图、Pareto前沿、热力图、参数演化和流量历时曲线。
 所有图形均采用学术论文级别的排版质量。
 """
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, message=".*Glyph.*missing from.*")
+warnings.filterwarnings("ignore", category=UserWarning, message=".*Font.*does not have a glyph.*")
+
+import logging
+logging.getLogger('matplotlib').setLevel(logging.ERROR)
 
 import matplotlib
 matplotlib.use('Agg')  # 设置非交互式后端，适用于服务器环境
@@ -14,20 +20,31 @@ import numpy as np
 import seaborn as sns
 
 # ========== 字体设置 ==========
-# 尝试使用中文字体 SimHei，若不可用则回退到 DejaVu Sans
-try:
-    matplotlib.rcParams['font.sans-serif'] = ['SimHei']
-    matplotlib.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
-    # 测试字体是否可用
-    from matplotlib.font_manager import FontProperties
-    _test_font = FontProperties(family='SimHei')
-    _test_font.get_name()
-except Exception:
-    matplotlib.rcParams['font.sans-serif'] = ['DejaVu Sans']
-    matplotlib.rcParams['axes.unicode_minus'] = False
+import os
+import matplotlib.font_manager as fm
+
+# 尝试在 WSL/Linux 环境下加载 Windows 挂载的或系统的中文字体文件
+possible_font_paths = [
+    '/mnt/c/Windows/Fonts/simhei.ttf',
+    '/mnt/c/Windows/Fonts/SimHei.ttf',
+    '/mnt/c/Windows/Fonts/msyh.ttc',      # 微软雅黑
+    '/mnt/c/Windows/Fonts/msyh.ttf',
+    '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc', # 文泉驿微米黑
+    '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', # Noto Sans CJK
+]
+
+for path in possible_font_paths:
+    if os.path.exists(path):
+        try:
+            fm.fontManager.addfont(path)
+        except Exception:
+            pass
 
 # ========== Seaborn 样式和配色 ==========
-sns.set_style('whitegrid')
+sns.set_style('whitegrid', rc={
+    'font.sans-serif': ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+})
+matplotlib.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 
 # 专业配色方案
 COLORS = [
@@ -90,7 +107,7 @@ def plot_hydrograph(dates, rainfall, obs, sim, title='', save_path=None):
     )
 
     ax1.set_xlabel('日期', fontsize=12)
-    ax1.set_ylabel('径流 (m³/s)', fontsize=12)
+    ax1.set_ylabel('径流 ($m^3/s$)', fontsize=12)
     ax1.set_title(title if title else '水文过程线对比图', fontsize=14, fontweight='bold')
 
     # 合并图例
@@ -211,7 +228,7 @@ def plot_scatter(obs, sim, title='', save_path=None):
 
     # R² 标注
     ax.text(
-        0.05, 0.95, f'R² = {r_squared:.4f}',
+        0.05, 0.95, f'$R^2$ = {r_squared:.4f}',
         transform=ax.transAxes, fontsize=13,
         verticalalignment='top',
         bbox=dict(boxstyle='round,pad=0.3', facecolor='wheat', alpha=0.8)
@@ -504,7 +521,7 @@ def plot_flow_duration_curve(obs, sim, title='', save_path=None):
     )
 
     ax.set_xlabel('超越概率 (%)', fontsize=12)
-    ax.set_ylabel('流量 (m³/s)', fontsize=12)
+    ax.set_ylabel('流量 ($m^3/s$)', fontsize=12)
     ax.set_title(title if title else '流量历时曲线', fontsize=14, fontweight='bold')
     ax.legend(fontsize=11, framealpha=0.9)
     ax.set_yscale('log')
