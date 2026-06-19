@@ -25,6 +25,53 @@ from src.visualization import plot_boxplot, plot_convergence, plot_hydrograph
 import matplotlib.pyplot as plt
 
 
+def run_pso_worker(args):
+    obj, seed = args
+    from src.pso_standard import pso_optimize
+    from src.hydro_model import GR4J_BOUNDS
+    return pso_optimize(
+        objective_func=obj,
+        bounds=GR4J_BOUNDS,
+        n_particles=50,
+        max_iter=200,
+        seed=seed,
+        verbose=False
+    )
+
+
+def run_de_worker(args):
+    obj, seed = args
+    from src.differential_evolution import de_optimize
+    from src.hydro_model import GR4J_BOUNDS
+    return de_optimize(
+        objective_func=obj,
+        bounds=GR4J_BOUNDS,
+        pop_size=50,
+        max_iter=200,
+        F=0.8,
+        CR=0.9,
+        seed=seed,
+        verbose=False
+    )
+
+
+def run_sa_worker(args):
+    obj, seed = args
+    from src.simulated_annealing import sa_optimize
+    from src.hydro_model import GR4J_BOUNDS
+    # 调整为3次重启 x 2000迭代 = 6000次评估，与PSO/DE预算(~10000次)相当，同时大幅减少时间
+    return sa_optimize(
+        objective_func=obj,
+        bounds=GR4J_BOUNDS,
+        max_iter=2000,
+        T0=100.0,
+        alpha=0.995,
+        n_restarts=3,
+        seed=seed,
+        verbose=False
+    )
+
+
 def main():
     """主函数：执行跨算法比较实验"""
     # ============================================================
@@ -52,70 +99,35 @@ def main():
     # 2. 定义算法（统一评估预算约10000次）
     # ============================================================
     n_runs = 10
-
-    def run_pso(seed):
-        """运行标准PSO: 50粒子 x 200迭代 = 10000次评估"""
-        return pso_optimize(
-            objective_func=objective,
-            bounds=GR4J_BOUNDS,
-            n_particles=50,
-            max_iter=200,
-            seed=seed,
-            verbose=False
-        )
-
-    def run_de(seed):
-        """运行差分进化: 50种群 x 200代 = 10000次评估"""
-        return de_optimize(
-            objective_func=objective,
-            bounds=GR4J_BOUNDS,
-            pop_size=50,
-            max_iter=200,
-            F=0.8,
-            CR=0.9,
-            seed=seed,
-            verbose=False
-        )
-
-    def run_sa(seed):
-        """运行模拟退火: 10000迭代 x 5重启"""
-        return sa_optimize(
-            objective_func=objective,
-            bounds=GR4J_BOUNDS,
-            max_iter=10000,
-            T0=100.0,
-            alpha=0.995,
-            n_restarts=5,
-            seed=seed,
-            verbose=False
-        )
+    import multiprocessing
 
     algorithms = {
-        'PSO': run_pso,
-        'DE': run_de,
-        'SA': run_sa,
+        'PSO': run_pso_worker,
+        'DE': run_de_worker,
+        'SA': run_sa_worker,
     }
 
     # ============================================================
-    # 3. 多次独立运行
+    # 3. 多次独立运行（并行加速）
     # ============================================================
     all_results = {}
     all_fitness = {}
 
-    for alg_name, alg_func in algorithms.items():
+    for alg_name, worker_func in algorithms.items():
         print(f"\n{'=' * 60}")
-        print(f"运行算法: {alg_name} （{n_runs}次独立运行）")
+        print(f"运行算法: {alg_name} （{n_runs}次独立运行，并行加速）")
         print(f"{'=' * 60}")
 
-        results_list = []
-        fitness_list = []
+        # 构造任务参数
+        args_list = [(objective, run_idx) for run_idx in range(n_runs)]
 
-        for run_idx in range(n_runs):
-            print(f"  第 {run_idx + 1}/{n_runs} 次运行 (seed={run_idx})...")
-            result = alg_func(seed=run_idx)
-            results_list.append(result)
-            fitness_list.append(result.best_fitness)
-            print(f"    最优适应度: {result.best_fitness:.6f}, 耗时: {result.wall_time:.2f}秒")
+        # 启动进程池运行
+        with multiprocessing.Pool(processes=4) as pool:
+            results_list = pool.map(worker_func, args_list)
+
+        fitness_list = [r.best_fitness for r in results_list]
+        for run_idx, res in enumerate(results_list):
+            print(f"  第 {run_idx + 1}/{n_runs} 次运行: 最优适应度 = {res.best_fitness:.6f}, 耗时 = {res.wall_time:.2f}s")
 
         all_results[alg_name] = results_list
         all_fitness[alg_name] = fitness_list

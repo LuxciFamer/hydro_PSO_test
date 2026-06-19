@@ -21,6 +21,26 @@ from src.visualization import plot_heatmap
 import matplotlib.pyplot as plt
 
 
+import multiprocessing
+
+
+def run_pso_worker_exp5(args):
+    """单次运行的辅助包装器，以支持多进程并行化"""
+    objective, bounds, n_particles, max_iter, w, c1, c2, seed = args
+    from src.pso_standard import pso_optimize
+    return pso_optimize(
+        objective_func=objective,
+        bounds=bounds,
+        n_particles=n_particles,
+        max_iter=max_iter,
+        w=w,
+        c1=c1,
+        c2=c2,
+        seed=seed,
+        verbose=False
+    )
+
+
 def main():
     """主函数：执行PSO超参数敏感性分析"""
     # ============================================================
@@ -48,33 +68,32 @@ def main():
     # 分析1：粒子数量敏感性
     # ============================================================
     print("\n" + "=" * 60)
-    print("分析1：粒子数量敏感性（总评估次数固定为10000）")
+    print("分析1：粒子数量敏感性（总评估次数固定为10000，并行加速）")
     print("=" * 60)
 
-    n_particles_list = [10, 20, 30, 50, 80, 100, 150, 200]
-    total_evals = 10000
-    n_runs_particle = 5
+    n_particles_list = [20, 50, 100, 200]
+    total_evals = 6000
+    n_runs_particle = 3
 
-    particle_results = {}  # {n_particles: [fitness values]}
-
+    # 构造任务参数列表
+    args_list_1 = []
     for n_p in n_particles_list:
         max_iter = total_evals // n_p
-        print(f"\n  粒子数={n_p}, 迭代数={max_iter} (总评估={n_p * max_iter})")
-
-        fitness_list = []
         for run_idx in range(n_runs_particle):
-            result = pso_optimize(
-                objective_func=objective,
-                bounds=GR4J_BOUNDS,
-                n_particles=n_p,
-                max_iter=max_iter,
-                seed=run_idx,
-                verbose=False
-            )
-            fitness_list.append(result.best_fitness)
-            print(f"    运行 {run_idx + 1}: 适应度={result.best_fitness:.6f}")
+            args_list_1.append((objective, GR4J_BOUNDS, n_p, max_iter, 0.729, 1.494, 1.494, run_idx))
 
-        particle_results[n_p] = fitness_list
+    # 并行运行
+    print(f"正在并行运行 {len(args_list_1)} 个优化任务...")
+    with multiprocessing.Pool(processes=4) as pool:
+        results_1 = pool.map(run_pso_worker_exp5, args_list_1)
+
+    # 整理结果
+    particle_results = {n_p: [] for n_p in n_particles_list}
+    idx = 0
+    for n_p in n_particles_list:
+        for _ in range(n_runs_particle):
+            particle_results[n_p].append(results_1[idx].best_fitness)
+            idx += 1
 
     # 打印粒子数量敏感性结果
     print("\n" + "-" * 50)
@@ -90,33 +109,30 @@ def main():
     # 分析2：惯性权重敏感性
     # ============================================================
     print("\n" + "=" * 60)
-    print("分析2：惯性权重敏感性（50粒子, 200迭代）")
+    print("分析2：惯性权重敏感性（50粒子, 200迭代，并行加速）")
     print("=" * 60)
 
-    w_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-    n_runs_w = 5
+    w_list = [0.1, 0.3, 0.5, 0.7, 0.9]
+    n_runs_w = 3
 
-    w_results = {}  # {w: [fitness values]}
-
+    # 构造任务参数列表
+    args_list_2 = []
     for w in w_list:
-        print(f"\n  惯性权重 w={w}")
-        fitness_list = []
         for run_idx in range(n_runs_w):
-            result = pso_optimize(
-                objective_func=objective,
-                bounds=GR4J_BOUNDS,
-                n_particles=50,
-                max_iter=200,
-                w=w,
-                c1=1.494,
-                c2=1.494,
-                seed=run_idx,
-                verbose=False
-            )
-            fitness_list.append(result.best_fitness)
-            print(f"    运行 {run_idx + 1}: 适应度={result.best_fitness:.6f}")
+            args_list_2.append((objective, GR4J_BOUNDS, 50, 120, w, 1.494, 1.494, run_idx))
 
-        w_results[w] = fitness_list
+    # 并行运行
+    print(f"正在并行运行 {len(args_list_2)} 个优化任务...")
+    with multiprocessing.Pool(processes=4) as pool:
+        results_2 = pool.map(run_pso_worker_exp5, args_list_2)
+
+    # 整理结果
+    w_results = {w: [] for w in w_list}
+    idx = 0
+    for w in w_list:
+        for _ in range(n_runs_w):
+            w_results[w].append(results_2[idx].best_fitness)
+            idx += 1
 
     # 打印惯性权重敏感性结果
     print("\n" + "-" * 50)
@@ -131,36 +147,35 @@ def main():
     # 分析3：c1/c2平衡热力图
     # ============================================================
     print("\n" + "=" * 60)
-    print("分析3：c1/c2学习因子平衡分析")
+    print("分析3：c1/c2学习因子平衡分析（并行加速）")
     print("=" * 60)
 
-    c1_list = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
-    c2_list = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+    c1_list = [0.5, 1.5, 2.5]
+    c2_list = [0.5, 1.5, 2.5]
     n_runs_c = 3
 
-    c_matrix = np.zeros((len(c2_list), len(c1_list)))
+    # 构造任务参数列表
+    args_list_3 = []
+    for c2 in c2_list:
+        for c1 in c1_list:
+            for run_idx in range(n_runs_c):
+                args_list_3.append((objective, GR4J_BOUNDS, 50, 120, 0.729, c1, c2, run_idx))
 
+    # 并行运行
+    print(f"正在并行运行 {len(args_list_3)} 个优化任务...")
+    with multiprocessing.Pool(processes=4) as pool:
+        results_3 = pool.map(run_pso_worker_exp5, args_list_3)
+
+    # 整理结果
+    c_matrix = np.zeros((len(c2_list), len(c1_list)))
+    idx = 0
     for i, c2 in enumerate(c2_list):
         for j, c1 in enumerate(c1_list):
-            print(f"  c1={c1}, c2={c2}")
             fitness_list = []
-            for run_idx in range(n_runs_c):
-                result = pso_optimize(
-                    objective_func=objective,
-                    bounds=GR4J_BOUNDS,
-                    n_particles=50,
-                    max_iter=200,
-                    w=0.729,
-                    c1=c1,
-                    c2=c2,
-                    seed=run_idx,
-                    verbose=False
-                )
-                fitness_list.append(result.best_fitness)
-
-            mean_fitness = np.mean(fitness_list)
-            c_matrix[i, j] = mean_fitness
-            print(f"    均值适应度: {mean_fitness:.6f}")
+            for _ in range(n_runs_c):
+                fitness_list.append(results_3[idx].best_fitness)
+                idx += 1
+            c_matrix[i, j] = np.mean(fitness_list)
 
     # 打印c1/c2热力图数据
     print("\n" + "-" * 50)

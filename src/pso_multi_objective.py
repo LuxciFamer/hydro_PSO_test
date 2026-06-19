@@ -252,30 +252,32 @@ def _update_archive(
     return archive_positions, archive_objectives
 
 
-def _reflect_boundary(positions, velocities, lower, upper, n_dims):
+def _reflect_boundary(positions, velocities, lower, upper):
     """
-    反射边界处理。
-
-    当粒子越界时反射回可行域，并反转对应维度的速度分量。
-
-    参数：
-        positions (np.ndarray): 粒子位置向量，形状 (n_dims,)。
-        velocities (np.ndarray): 粒子速度向量，形状 (n_dims,)。
-        lower (np.ndarray): 各维度下界。
-        upper (np.ndarray): 各维度上界。
-        n_dims (int): 维度数。
-
-    返回：
-        tuple: (修正后的位置, 修正后的速度)
+    反射边界处理（安全且向量化，无循环，O(1)时间复杂度）。
+    当粒子超出边界时，反射其位置并反转速度。如果反射后仍超出边界，则进行截断并清零速度。
     """
-    for d in range(n_dims):
-        while positions[d] < lower[d] or positions[d] > upper[d]:
-            if positions[d] < lower[d]:
-                positions[d] = 2.0 * lower[d] - positions[d]
-                velocities[d] = -velocities[d]
-            if positions[d] > upper[d]:
-                positions[d] = 2.0 * upper[d] - positions[d]
-                velocities[d] = -velocities[d]
+    lower_b = np.broadcast_to(lower, positions.shape)
+    upper_b = np.broadcast_to(upper, positions.shape)
+
+    under_mask = positions < lower_b
+    if np.any(under_mask):
+        positions[under_mask] = 2.0 * lower_b[under_mask] - positions[under_mask]
+        velocities[under_mask] = -velocities[under_mask]
+        still_under = positions < lower_b
+        if np.any(still_under):
+            positions[still_under] = lower_b[still_under]
+            velocities[still_under] = 0.0
+
+    over_mask = positions > upper_b
+    if np.any(over_mask):
+        positions[over_mask] = 2.0 * upper_b[over_mask] - positions[over_mask]
+        velocities[over_mask] = -velocities[over_mask]
+        still_over = positions > upper_b
+        if np.any(still_over):
+            positions[still_over] = upper_b[still_over]
+            velocities[still_over] = 0.0
+
     return positions, velocities
 
 
@@ -296,47 +298,20 @@ def mopso_optimize(
     并通过自适应网格机制保持解的多样性。适用于水文模型的多目标参数率定，
     例如同时优化NSE（纳什效率系数）和水量平衡误差。
 
-    算法流程：
-        1. 初始化粒子群，评价所有目标函数
-        2. 用非支配解初始化外部存档
-        3. 迭代优化：
-           a. 通过自适应网格从存档中选择领导者（偏好稀疏区域）
-           b. 更新速度：v = w*v + c1*r1*(pbest-x) + c2*r2*(leader-x)
-              惯性权重w从0.5线性递减到0.1
-           c. 更新位置，应用反射边界处理
-           d. 评价所有粒子的目标函数值
-           e. 更新pbest：新解支配旧解则更新，互不支配则随机选择
-           f. 更新外部存档：加入非支配解，超出限制时裁剪最拥挤区域
-           g. 记录存档大小到收敛历史
-
     参数：
         objective_funcs (list of callable): 目标函数列表，每个函数接受
-            一维numpy数组（参数向量），返回标量值。所有目标均为最小化。
+            一维numpy数组（参数向量）或二维numpy数组（批量参数），返回标量或一维数组。
+            所有目标均为最小化。
         bounds (np.ndarray): 参数边界，形状 (n_dims, 2)，每行 [下界, 上界]。
-        n_particles (int): 粒子群规模，默认100。多目标优化通常需要更多粒子。
+        n_particles (int): 粒子群规模，默认100。
         max_iter (int): 最大迭代次数，默认200。
         archive_size (int): 外部存档最大容量，默认100。
-            较大的存档能更好地近似Pareto前沿，但增加计算开销。
         n_grids (int): 每个目标维度的网格划分数，默认10。
-            控制自适应网格的分辨率。
         seed (int or None): 随机数种子，默认None。
         verbose (bool): 是否打印优化过程信息，默认True。
 
-    返回：
-        MOPSOResult: 多目标优化结果数据类，包含：
-            - pareto_front (np.ndarray): Pareto前沿目标值矩阵，
-              形状 (n_solutions, n_objectives)
-            - pareto_set (np.ndarray): Pareto最优解参数矩阵，
-              形状 (n_solutions, n_dims)
-            - convergence_history (list): 每次迭代的存档大小记录
-
-    示例：
-        >>> import numpy as np
-        >>> def f1(x): return np.sum(x**2)
-        >>> def f2(x): return np.sum((x - 2)**2)
-        >>> bounds = np.array([[-5, 5], [-5, 5]])
-        >>> result = mopso_optimize([f1, f2], bounds, n_particles=50, max_iter=100)
-        >>> print(f"Pareto前沿大小: {len(result.pareto_front)}")
+    返回:
+        MOPSOResult: 多目标优化结果数据类
     """
     start_time = time.time()
     rng = np.random.RandomState(seed)
@@ -352,15 +327,17 @@ def mopso_optimize(
     w_max = 0.5
     w_min = 0.1
 
+    # 最大速度限制
+    max_vel = 0.5 * (upper - lower)
+
     # ---- 步骤1：初始化粒子群 ----
     positions = lower + rng.rand(n_particles, n_dims) * (upper - lower)
     velocities = np.zeros((n_particles, n_dims))
 
-    # 评价所有目标
+    # 评价所有目标 (批量评估)
     objectives = np.zeros((n_particles, n_objectives))
-    for i in range(n_particles):
-        for j, func in enumerate(objective_funcs):
-            objectives[i, j] = func(positions[i])
+    for j, func in enumerate(objective_funcs):
+        objectives[:, j] = func(positions)
 
     # 初始化pbest
     pbest_positions = positions.copy()
@@ -390,41 +367,41 @@ def mopso_optimize(
         # 线性递减惯性权重
         w = w_max - (w_max - w_min) * iteration / max_iter
 
-        for i in range(n_particles):
-            # 从存档中选择领导者（自适应网格选择）
-            if len(archive_positions) > 0:
+        # 从存档中选择领导者 (逐个粒子选择)
+        leaders = np.zeros((n_particles, n_dims))
+        if len(archive_positions) > 0:
+            for i in range(n_particles):
                 leader_idx = _adaptive_grid_selection(
                     archive_objectives, n_grids, rng
                 )
-                leader = archive_positions[leader_idx]
-            else:
-                # 存档为空时（不应发生），使用自身pbest
-                leader = pbest_positions[i]
+                leaders[i] = archive_positions[leader_idx]
+        else:
+            leaders = pbest_positions.copy()
 
-            r1 = rng.rand(n_dims)
-            r2 = rng.rand(n_dims)
+        r1 = rng.rand(n_particles, n_dims)
+        r2 = rng.rand(n_particles, n_dims)
 
-            # 速度更新
-            velocities[i] = (
-                w * velocities[i]
-                + c1 * r1 * (pbest_positions[i] - positions[i])
-                + c2 * r2 * (leader - positions[i])
-            )
+        # 速度更新
+        velocities = (
+            w * velocities
+            + c1 * r1 * (pbest_positions - positions)
+            + c2 * r2 * (leaders - positions)
+        )
+        
+        # 速度裁剪
+        velocities = np.clip(velocities, -max_vel[np.newaxis, :], max_vel[np.newaxis, :])
 
-            # 位置更新
-            positions[i] = positions[i] + velocities[i]
+        # 位置更新
+        positions = positions + velocities
 
-            # 反射边界处理
-            positions[i], velocities[i] = _reflect_boundary(
-                positions[i], velocities[i], lower, upper, n_dims
-            )
+        # 反射边界处理
+        positions, velocities = _reflect_boundary(positions, velocities, lower, upper)
 
-        # 评价所有粒子的目标函数
-        for i in range(n_particles):
-            for j, func in enumerate(objective_funcs):
-                objectives[i, j] = func(positions[i])
+        # 评价所有粒子的目标函数 (批量评估)
+        for j, func in enumerate(objective_funcs):
+            objectives[:, j] = func(positions)
 
-        # 更新pbest
+        # 更新pbest (逐个粒子比较支配关系)
         for i in range(n_particles):
             if _dominates(objectives[i], pbest_objectives[i]):
                 # 新解支配旧pbest，更新
@@ -435,7 +412,6 @@ def mopso_optimize(
                 if rng.rand() < 0.5:
                     pbest_positions[i] = positions[i].copy()
                     pbest_objectives[i] = objectives[i].copy()
-            # 如果旧pbest支配新解，保持不变
 
         # 更新外部存档
         archive_positions, archive_objectives = _update_archive(

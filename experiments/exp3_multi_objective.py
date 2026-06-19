@@ -58,10 +58,20 @@ def main():
 
     def obj_pbias(params):
         """最小化绝对PBIAS"""
-        sim = gr4j(params, cal_data.rainfall, cal_data.pet)
-        obs = cal_data.runoff_obs[warmup:]
-        sim_eval = sim[warmup:]
-        return abs(pbias(obs, sim_eval))
+        params = np.asarray(params)
+        if params.ndim == 2:
+            sim = gr4j(params, cal_data.rainfall, cal_data.pet)
+            obs = cal_data.runoff_obs[warmup:]
+            sim_eval = sim[warmup:, :]
+            sum_obs = np.sum(obs)
+            if sum_obs == 0.0:
+                return np.full(params.shape[0], np.inf)
+            return np.abs(100.0 * np.sum(sim_eval - obs[:, np.newaxis], axis=0) / sum_obs)
+        else:
+            sim = gr4j(params, cal_data.rainfall, cal_data.pet)
+            obs = cal_data.runoff_obs[warmup:]
+            sim_eval = sim[warmup:]
+            return abs(pbias(obs, sim_eval))
 
     objective_funcs = [obj_nse, obj_pbias]
 

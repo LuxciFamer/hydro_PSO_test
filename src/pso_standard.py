@@ -98,7 +98,7 @@ def pso_optimize(
     velocities = np.zeros((n_particles, n_dims))
 
     # ---- 步骤2：评价所有粒子，初始化pbest和gbest ----
-    fitness = np.array([objective_func(positions[i]) for i in range(n_particles)])
+    fitness = np.array(objective_func(positions))
     n_evaluations = n_particles
 
     # 个体最优
@@ -112,41 +112,60 @@ def pso_optimize(
 
     convergence_history = []
 
+    # 预计算最大速度限制
+    max_vel = 0.5 * (upper - lower)
+
+    # 广播边界以供向量化计算使用
+    lower_b = np.broadcast_to(lower, positions.shape)
+    upper_b = np.broadcast_to(upper, positions.shape)
+
     # ---- 步骤3：主循环 ----
     for iteration in range(max_iter):
-        for i in range(n_particles):
-            # 生成随机系数（每个维度独立）
-            r1 = rng.rand(n_dims)
-            r2 = rng.rand(n_dims)
+        # 生成随机系数（所有粒子和维度独立）
+        r1 = rng.rand(n_particles, n_dims)
+        r2 = rng.rand(n_particles, n_dims)
 
-            # 速度更新
-            velocities[i] = (
-                w * velocities[i]
-                + c1 * r1 * (pbest_positions[i] - positions[i])
-                + c2 * r2 * (gbest_position - positions[i])
-            )
+        # 速度更新
+        velocities = (
+            w * velocities
+            + c1 * r1 * (pbest_positions - positions)
+            + c2 * r2 * (gbest_position[np.newaxis, :] - positions)
+        )
 
-            # 位置更新
-            positions[i] = positions[i] + velocities[i]
+        # 速度裁剪
+        velocities = np.clip(velocities, -max_vel[np.newaxis, :], max_vel[np.newaxis, :])
 
-            # 反射边界处理
-            for d in range(n_dims):
-                while positions[i, d] < lower[d] or positions[i, d] > upper[d]:
-                    if positions[i, d] < lower[d]:
-                        positions[i, d] = 2.0 * lower[d] - positions[i, d]
-                        velocities[i, d] = -velocities[i, d]
-                    if positions[i, d] > upper[d]:
-                        positions[i, d] = 2.0 * upper[d] - positions[i, d]
-                        velocities[i, d] = -velocities[i, d]
+        # 位置更新
+        positions = positions + velocities
 
-            # 评价适应度
-            fitness[i] = objective_func(positions[i])
-            n_evaluations += 1
+        # 安全边界反射处理 (向量化, O(1), 无循环)
+        under_mask = positions < lower_b
+        if np.any(under_mask):
+            positions[under_mask] = 2.0 * lower_b[under_mask] - positions[under_mask]
+            velocities[under_mask] = -velocities[under_mask]
+            still_under = positions < lower_b
+            if np.any(still_under):
+                positions[still_under] = lower_b[still_under]
+                velocities[still_under] = 0.0
 
-            # 更新个体最优
-            if fitness[i] < pbest_fitness[i]:
-                pbest_fitness[i] = fitness[i]
-                pbest_positions[i] = positions[i].copy()
+        over_mask = positions > upper_b
+        if np.any(over_mask):
+            positions[over_mask] = 2.0 * upper_b[over_mask] - positions[over_mask]
+            velocities[over_mask] = -velocities[over_mask]
+            still_over = positions > upper_b
+            if np.any(still_over):
+                positions[still_over] = upper_b[still_over]
+                velocities[still_over] = 0.0
+
+        # 评价适应度 (批量评价)
+        fitness = np.array(objective_func(positions))
+        n_evaluations += n_particles
+
+        # 更新个体最优
+        better_mask = fitness < pbest_fitness
+        if np.any(better_mask):
+            pbest_fitness[better_mask] = fitness[better_mask]
+            pbest_positions[better_mask] = positions[better_mask].copy()
 
         # 更新全局最优
         current_best_idx = np.argmin(pbest_fitness)

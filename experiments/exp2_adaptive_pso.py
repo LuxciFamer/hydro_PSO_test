@@ -25,6 +25,22 @@ from src.visualization import (
 import matplotlib.pyplot as plt
 
 
+import multiprocessing
+
+
+def run_single_run(args):
+    """单次运行的辅助包装器，以支持多进程并行化"""
+    alg_func, objective, bounds, n_particles, max_iter, seed = args
+    return alg_func(
+        objective_func=objective,
+        bounds=bounds,
+        n_particles=n_particles,
+        max_iter=max_iter,
+        seed=seed,
+        verbose=False
+    )
+
+
 def main():
     """主函数：执行自适应PSO变体比较实验"""
     # ============================================================
@@ -64,32 +80,29 @@ def main():
     max_iter = 200
 
     # ============================================================
-    # 3. 多次独立运行
+    # 3. 多次独立运行（并行加速）
     # ============================================================
     all_results = {}  # {算法名: [OptimizationResult, ...]}
     all_fitness = {}  # {算法名: [best_fitness, ...]}
 
     for alg_name, alg_func in algorithms.items():
         print(f"\n{'=' * 60}")
-        print(f"运行算法: {alg_name} （{n_runs}次独立运行）")
+        print(f"运行算法: {alg_name} （{n_runs}次独立运行，并行加速）")
         print(f"{'=' * 60}")
 
-        results_list = []
-        fitness_list = []
+        # 构造多进程任务参数
+        args_list = [
+            (alg_func, objective, GR4J_BOUNDS, n_particles, max_iter, run_idx)
+            for run_idx in range(n_runs)
+        ]
 
-        for run_idx in range(n_runs):
-            print(f"  第 {run_idx + 1}/{n_runs} 次运行 (seed={run_idx})...")
-            result = alg_func(
-                objective_func=objective,
-                bounds=GR4J_BOUNDS,
-                n_particles=n_particles,
-                max_iter=max_iter,
-                seed=run_idx,
-                verbose=False
-            )
-            results_list.append(result)
-            fitness_list.append(result.best_fitness)
-            print(f"    最优适应度: {result.best_fitness:.6f}")
+        # 启动多进程计算
+        with multiprocessing.Pool(processes=4) as pool:
+            results_list = pool.map(run_single_run, args_list)
+
+        fitness_list = [r.best_fitness for r in results_list]
+        for run_idx, res in enumerate(results_list):
+            print(f"  第 {run_idx + 1}/{n_runs} 次运行: 最优适应度 = {res.best_fitness:.6f}, 耗时 = {res.wall_time:.2f}s")
 
         all_results[alg_name] = results_list
         all_fitness[alg_name] = fitness_list

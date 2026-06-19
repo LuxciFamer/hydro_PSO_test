@@ -180,6 +180,43 @@ class MOPSOResult:
 # 目标函数工厂
 # ============================================================
 
+class GR4JObjective:
+    """可序列化的目标函数类，以支持多进程并行化"""
+    def __init__(self, rainfall, pet, obs_runoff, metric_func, negate, warmup):
+        self.rainfall = rainfall
+        self.pet = pet
+        self.obs_runoff = obs_runoff
+        self.metric_func = metric_func
+        self.negate = negate
+        self.warmup = warmup
+
+    def __call__(self, params: np.ndarray) -> float | np.ndarray:
+        params = np.asarray(params)
+        is_batch = params.ndim == 2
+
+        # 运行GR4J模型
+        sim_runoff = gr4j(params, self.rainfall, self.pet)
+
+        # 跳过预热期，仅用预热期后的数据计算指标
+        obs_eval = self.obs_runoff[self.warmup:]
+
+        if is_batch:
+            sim_eval = sim_runoff[self.warmup:, :]
+            N = params.shape[0]
+            values = np.array([self.metric_func(obs_eval, sim_eval[:, i]) for i in range(N)])
+            if self.negate:
+                return -values
+            else:
+                return values
+        else:
+            sim_eval = sim_runoff[self.warmup:]
+            value = self.metric_func(obs_eval, sim_eval)
+            if self.negate:
+                return -value
+            else:
+                return value
+
+
 def create_objective(
     rainfall: np.ndarray,
     pet: np.ndarray,
@@ -230,29 +267,4 @@ def create_objective(
     metric_func = metric_functions[metric]
     negate = metric in negate_metrics
 
-    def objective(params: np.ndarray) -> float:
-        """目标函数: 运行GR4J模型并计算评价指标
-
-        Args:
-            params: 模型参数向量 [X1, X2, X3, X4]
-
-        Returns:
-            float: 待最小化的目标值
-        """
-        # 运行GR4J模型
-        sim_runoff = gr4j(params, rainfall, pet)
-
-        # 跳过预热期，仅用预热期后的数据计算指标
-        obs_eval = obs_runoff[warmup:]
-        sim_eval = sim_runoff[warmup:]
-
-        # 计算评价指标
-        value = metric_func(obs_eval, sim_eval)
-
-        # 对"越大越好"的指标取负值，使其适配最小化优化
-        if negate:
-            return -value
-        else:
-            return value
-
-    return objective
+    return GR4JObjective(rainfall, pet, obs_runoff, metric_func, negate, warmup)

@@ -54,7 +54,7 @@ def de_optimize(
     population = lower + rng.rand(pop_size, n_params) * (upper - lower)
 
     # ========== 步骤2: 评估所有个体的适应度 ==========
-    fitness = np.array([objective_func(ind) for ind in population])
+    fitness = np.array(objective_func(population))
     n_evaluations = pop_size
 
     # 记录当前全局最优
@@ -74,6 +74,7 @@ def de_optimize(
 
     # ========== 步骤3: 迭代进化 ==========
     for gen in range(max_iter):
+        trials = np.zeros((pop_size, n_params))
         for i in range(pop_size):
             # ----- 3a. 变异操作 (DE/rand/1) -----
             # 选择3个互不相同且不等于i的随机索引
@@ -94,20 +95,21 @@ def de_optimize(
 
             # ----- 3c. 边界处理 -----
             # 将试验向量裁剪到合法参数范围内
-            trial = np.clip(trial, lower, upper)
+            trials[i] = np.clip(trial, lower, upper)
 
-            # ----- 3d. 选择操作 (贪婪选择) -----
-            trial_fitness = objective_func(trial)
-            n_evaluations += 1
+        # ----- 3d. 选择操作 (批量评价并选择) -----
+        trial_fitness = np.array(objective_func(trials))
+        n_evaluations += pop_size
 
-            if trial_fitness <= fitness[i]:
-                population[i] = trial
-                fitness[i] = trial_fitness
+        for i in range(pop_size):
+            if trial_fitness[i] <= fitness[i]:
+                population[i] = trials[i]
+                fitness[i] = trial_fitness[i]
 
                 # ----- 3e. 更新全局最优 -----
-                if trial_fitness < best_fitness:
-                    best_fitness = trial_fitness
-                    best_params = trial.copy()
+                if trial_fitness[i] < best_fitness:
+                    best_fitness = trial_fitness[i]
+                    best_params = trials[i].copy()
 
         # 记录本代最优适应度到收敛历史
         convergence_history.append(best_fitness)
