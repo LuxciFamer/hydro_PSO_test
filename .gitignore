@@ -1,3 +1,13 @@
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDEs
+.idea/
+.vscode/
